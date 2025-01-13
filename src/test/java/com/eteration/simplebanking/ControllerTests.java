@@ -1,94 +1,118 @@
 package com.eteration.simplebanking;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-
-import com.eteration.simplebanking.controller.AccountController;
-import com.eteration.simplebanking.controller.TransactionStatus;
-import com.eteration.simplebanking.model.Account;
-import com.eteration.simplebanking.model.DepositTransaction;
-import com.eteration.simplebanking.model.InsufficientBalanceException;
-import com.eteration.simplebanking.model.WithdrawalTransaction;
-import com.eteration.simplebanking.services.AccountService;
-
-import org.junit.jupiter.api.Assertions;
+import com.eteration.simplebanking.constants.MessageConstants;
+import com.eteration.simplebanking.dto.BankAccountDTO;
+import com.eteration.simplebanking.exception.BankAccountNotFoundException;
+import com.eteration.simplebanking.exception.InsufficientBalanceException;
+import com.eteration.simplebanking.payload.request.CommonTransactionRequest;
+import com.eteration.simplebanking.payload.request.PhoneBillPaymentTransactionRequest;
+import com.eteration.simplebanking.payload.response.CommonTransactionResponse;
+import com.eteration.simplebanking.services.BankAccountService;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.Spy;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.ResponseEntity;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 
 @SpringBootTest
 @ContextConfiguration
 @AutoConfigureMockMvc
-class ControllerTests  {
+public class ControllerTests {
 
-    @Spy
-    @InjectMocks
-    private AccountController controller;
- 
-    @Mock
-    private AccountService service;
+    @Autowired
+    private MockMvc mockMvc;
 
-    
+    @MockBean
+    private BankAccountService bankAccountService;
+
     @Test
-    public void givenId_Credit_thenReturnJson()
-    throws Exception {
-        
-        Account account = new Account("Kerem Karaca", "17892");
+    public void givenId_GetAccount_thenReturnJson() throws Exception {
+        BankAccountDTO account = new BankAccountDTO("Kerem Karaca", "17892", 1000.0);
+        Mockito.when(bankAccountService.findBankAccountByAccountNumber(anyString())).thenReturn(account);
 
-        doReturn(account).when(service).findAccount( "17892");
-        ResponseEntity<TransactionStatus> result = controller.credit( "17892", new DepositTransaction(1000.0));
-        verify(service, times(1)).findAccount("17892");
-        assertEquals("OK", result.getBody().getStatus());
+        mockMvc.perform(get("/account/v1/17892"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.owner").value("Kerem Karaca"))
+                .andExpect(jsonPath("$.accountNumber").value("17892"))
+                .andExpect(jsonPath("$.balance").value(1000.0));
     }
 
     @Test
-    public void givenId_CreditAndThenDebit_thenReturnJson()
-    throws Exception {
-        
-        Account account = new Account("Kerem Karaca", "17892");
+    public void givenId_Credit_thenReturnJson() throws Exception {
+        CommonTransactionResponse response = new CommonTransactionResponse("OK", "APPROVAL123");
+        Mockito.when(bankAccountService.deposit(anyString(), any(CommonTransactionRequest.class))).thenReturn(response);
 
-        doReturn(account).when(service).findAccount( "17892");
-        ResponseEntity<TransactionStatus> result = controller.credit( "17892", new DepositTransaction(1000.0));
-        ResponseEntity<TransactionStatus> result2 = controller.debit( "17892", new WithdrawalTransaction(50.0));
-        verify(service, times(2)).findAccount("17892");
-        assertEquals("OK", result.getBody().getStatus());
-        assertEquals("OK", result2.getBody().getStatus());
-        assertEquals(950.0, account.getBalance(),0.001);
+        mockMvc.perform(post("/account/v1/credit/17892")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 1000.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OK"))
+                .andExpect(jsonPath("$.approvalCode").value("APPROVAL123"));
     }
 
     @Test
-    public void givenId_CreditAndThenDebitMoreGetException_thenReturnJson()
-    throws Exception {
-        Assertions.assertThrows( InsufficientBalanceException.class, () -> {
-            Account account = new Account("Kerem Karaca", "17892");
+    public void givenId_Debit_thenReturnJson() throws Exception {
+        CommonTransactionResponse response = new CommonTransactionResponse("OK", "APPROVAL124");
+        Mockito.when(bankAccountService.withdraw(anyString(), any(CommonTransactionRequest.class))).thenReturn(response);
 
-            doReturn(account).when(service).findAccount( "17892");
-            ResponseEntity<TransactionStatus> result = controller.credit( "17892", new DepositTransaction(1000.0));
-            assertEquals("OK", result.getBody().getStatus());
-            assertEquals(1000.0, account.getBalance(),0.001);
-            verify(service, times(1)).findAccount("17892");
-
-            ResponseEntity<TransactionStatus> result2 = controller.debit( "17892", new WithdrawalTransaction(5000.0));
-        });
+        mockMvc.perform(post("/account/v1/debit/17892")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 50.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OK"))
+                .andExpect(jsonPath("$.approvalCode").value("APPROVAL124"));
     }
 
     @Test
-    public void givenId_GetAccount_thenReturnJson()
-    throws Exception {
-        
-        Account account = new Account("Kerem Karaca", "17892");
+    public void givenId_Payment_thenReturnJson() throws Exception {
+        CommonTransactionResponse response = new CommonTransactionResponse("OK", "APPROVAL125");
+        Mockito.when(bankAccountService.phoneBillPayment(anyString(), any(PhoneBillPaymentTransactionRequest.class))).thenReturn(response);
 
-        doReturn(account).when(service).findAccount( "17892");
-        ResponseEntity<Account> result = controller.getAccount( "17892");
-        verify(service, times(1)).findAccount("17892");
-        assertEquals(account, result.getBody());
+        mockMvc.perform(post("/account/v1/payment/17892")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 150.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OK"))
+                .andExpect(jsonPath("$.approvalCode").value("APPROVAL125"));
     }
 
+    @Test
+    public void givenInvalidId_GetAccount_thenReturnNotFound() throws Exception {
+        Mockito.when(bankAccountService.findBankAccountByAccountNumber(anyString()))
+                .thenThrow(new BankAccountNotFoundException(MessageConstants.ACCOUNT_NOT_FOUND));
+
+        mockMvc.perform(get("/account/v1/invalid"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(MessageConstants.ACCOUNT_NOT_FOUND));
+    }
+
+    @Test
+    public void givenId_DebitInsufficientBalance_thenReturnBadRequest() throws Exception {
+        Mockito.when(bankAccountService.withdraw(anyString(), any(CommonTransactionRequest.class)))
+                .thenThrow(new InsufficientBalanceException("Insufficient balance"));
+
+        mockMvc.perform(post("/account/v1/debit/17892")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 5000.0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Insufficient balance"));
+    }
+
+    @Test
+    public void givenId_CreditNegativeAmount_thenReturnBadRequest() throws Exception {
+        mockMvc.perform(post("/account/v1/credit/17892")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": -1000.0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(MessageConstants.AMOUNT_GREATER_THAN_ZERO));
+    }
 }
